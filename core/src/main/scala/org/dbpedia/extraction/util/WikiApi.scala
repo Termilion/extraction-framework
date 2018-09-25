@@ -1,15 +1,16 @@
 package org.dbpedia.extraction.util
 
-import java.util.logging.Logger
 import java.io.IOException
 import java.net.{HttpURLConnection, URL, URLEncoder}
 import javax.net.ssl.HttpsURLConnection
-import scala.xml.{XML, Elem, Node}
+
+import scala.xml.{Elem, Node, XML}
 import scala.collection.immutable.Seq
 import scala.language.postfixOps
-import org.dbpedia.extraction.wikiparser.{WikiPage, WikiTitle, Namespace}
-
+import org.dbpedia.extraction.wikiparser.{Namespace, WikiPage, WikiTitle}
 import WikiApi._
+import org.apache.log4j.Logger
+import org.dbpedia.extraction.config.{ExtractionLogger, ExtractionRecorder}
 
 object WikiApi
 {
@@ -46,7 +47,7 @@ object WikiApi
  */
 class WikiApi(url: URL, language: Language)
 {
-    private val logger = Logger.getLogger(classOf[WikiApi].getName)
+    private val logger = ExtractionLogger.getLogger(getClass, language)
 
     /** The number of retries before a query is considered as failed */
     private val maxRetries = 10
@@ -196,24 +197,24 @@ class WikiApi(url: URL, language: Language)
      */
     def retrieveTemplateUsageIDs(title : WikiTitle, maxCount : Int = 500) : List[Long] =
     {
-        var pageList = List[Long]();
-        var  canContinue = false;
-        var eicontinue = "";
-        var appropriateQuery = "";
+        var pageList = List[Long]()
+        var  canContinue = false
+        var eicontinue = ""
+        var appropriateQuery = ""
 
         do{
             appropriateQuery = "?action=query&continue=&format=xml&list=embeddedin&eititle=" + title.encodedWithNamespace +
-                                "&einamespace=0&eifilterredir=nonredirects&eilimit=" + maxCount;
+                                "&einamespace=0&eifilterredir=nonredirects&eilimit=" + maxCount
             //Since the call can return only 500 matches at most we must use the eicontinue parameter to
             //get the other matches
             if(canContinue)
-                appropriateQuery = appropriateQuery + "&eicontinue=" + eicontinue;
+                appropriateQuery = appropriateQuery + "&eicontinue=" + eicontinue
 
-            val response = query(appropriateQuery);
+            val response = query(appropriateQuery)
 
-                val queryContinue = response \ "query-continue" \ "embeddedin";
-                val continueSeq = queryContinue \\ "@eicontinue";
-                eicontinue = continueSeq.text;
+                val queryContinue = response \ "query-continue" \ "embeddedin"
+                val continueSeq = queryContinue \\ "@eicontinue"
+                eicontinue = continueSeq.text
 
                 canContinue = false;
 
@@ -222,11 +223,11 @@ class WikiApi(url: URL, language: Language)
 
                 for(page <- response \ "query" \ "embeddedin" \ "ei";
                     title <- page \ "@pageid" ){
-                        pageList = pageList ::: List(title.text.toLong);
+                        pageList = pageList ::: List(title.text.toLong)
                 }
         }while(canContinue)
 
-      pageList;
+      pageList
     }
 
     /**
@@ -291,7 +292,7 @@ class WikiApi(url: URL, language: Language)
                 {
                     if(i < maxRetries - 1)
                     {
-                        logger.fine("Query failed: " + params + ". Retrying...")
+                        logger.info("Query failed: " + params + ". Retrying...")
                     }
                     else
                     {

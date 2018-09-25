@@ -6,7 +6,7 @@ import org.dbpedia.extraction.annotations.{AnnotationType, SoftwareAgentAnnotati
 import org.dbpedia.extraction.config.provenance.DBpediaDatasets
 import org.dbpedia.extraction.ontology.datatypes.Datatype
 import org.dbpedia.extraction.ontology.{OntologyObjectProperty, OntologyProperty}
-import org.dbpedia.extraction.transform.Quad
+import org.dbpedia.extraction.transform.{Quad, QuadBuilder}
 import org.dbpedia.extraction.util.Language
 import org.dbpedia.extraction.wikiparser.TemplateNode
 import org.dbpedia.iri.UriUtils
@@ -41,6 +41,10 @@ extends PropertyMapping
   //split to literal / object dataset
   val dataset = if (isObjectProperty) DBpediaDatasets.OntologyPropertiesObjects else DBpediaDatasets.OntologyPropertiesLiterals
 
+  override val datasets = Set(DBpediaDatasets.OntologyPropertiesObjects, DBpediaDatasets.OntologyPropertiesLiterals)
+
+  private val qb = QuadBuilder(context.language, dataset, ontologyProperty, datatype)
+
   if (isObjectProperty)
   {
     require(datatype == null, "expected no datatype for object property '"+ontologyProperty+"', but found datatype '"+datatype+"'")
@@ -50,14 +54,21 @@ extends PropertyMapping
         else u.toString
       case Failure(f) => context.language.resourceUri.append(value)
     }
+    qb.setDatatype(null.asInstanceOf[String])
   }
-
-  override val datasets = Set(DBpediaDatasets.OntologyPropertiesObjects, DBpediaDatasets.OntologyPropertiesLiterals)
+  else{
+    //if datatype property and no type was assigned, we assume a language string
+    if(datatype == null)
+      qb.setDatatype(Quad.langString)
+  }
+  qb.setValue(value)
+  qb.setExtractor(this.softwareAgentAnnotation)
 
   override def extract(node : TemplateNode, subjectUri : String) : Seq[Quad] =
   {
-    Seq(new Quad(context.language, dataset, subjectUri, ontologyProperty, value, node.sourceIri, datatype))
+    qb.setSubject(subjectUri)
+    qb.setSourceUri(node.sourceIri)
+    qb.setNodeRecord(node.getNodeRecord)
+    Seq(qb.getQuad)
   }
-
-
 }

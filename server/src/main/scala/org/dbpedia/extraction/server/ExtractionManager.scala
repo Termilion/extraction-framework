@@ -4,7 +4,7 @@ import java.io.File
 import java.net.URL
 import java.util.logging.{Level, Logger}
 
-import org.dbpedia.extraction.config.ExtractionRecorder
+import org.dbpedia.extraction.config.{ExtractionLogger, ExtractionRecorder}
 import org.dbpedia.extraction.destinations.Destination
 import org.dbpedia.extraction.mappings._
 import org.dbpedia.extraction.ontology.Ontology
@@ -32,7 +32,7 @@ abstract class ExtractionManager(
     customTestExtractors: Map[Language, Seq[Class[_ <: Extractor[_]]]])
 {
   self =>
-    private val logger = Logger.getLogger(classOf[ExtractionManager].getName)
+    private val logger = ExtractionLogger.getLogger(getClass, Language.None)
 
     def mappingExtractor(language : Language) : WikiPageExtractor
 
@@ -65,22 +65,23 @@ abstract class ExtractionManager(
 
   def extract(title: String, destination: Destination, language: Language): Unit = {
     val extract = mappingExtractor(language)
+    val datasets = extract.datasets.map(x => x.canonicalUri.toString)
     val source = WikiSource.fromTitles(List(WikiTitle.parse(title, Language.English)), new URL(Language.English.apiUri), Language.English)
     val er = Server.getExtractionRecorder[Quad](language)
     for (page <- source){
-      val quads = extract.extract(page, page.uri)
-      quads.foreach(q => er.record(q))
+      val quads = extract.extract(page, page.uri).filter(q => datasets.contains(q.dataset))
+      quads.foreach(q => logger.debug(q))
       destination.write(quads.sortBy(x => (x.subject, x.predicate)).reverse)
     }
   }
 
     def extract(source: Source, destination: Destination, language: Language, useCustomExtraction: Boolean = false): Unit = {
-      val extract = if (useCustomExtraction) customExtractor(language) else mappingExtractor(language)
-      val er = Server.getExtractionRecorder[Quad](language)
+      val extractor = if (useCustomExtraction) customExtractor(language) else mappingExtractor(language)
+      val datasets = extractor.datasets.map(x => x.canonicalUri.toString)
       destination.open()
       for (page <- source){
-        val quads = extract.extract(page, page.uri)
-        quads.foreach(q => er.record(q))
+        val quads = extractor.extract(page, page.uri).filter(q => datasets.contains(q.dataset))
+        quads.foreach(q => logger.debug(q))
         destination.write(quads.sortBy(x => (x.subject, x.predicate)).reverse)
       }
       destination.close()
@@ -133,7 +134,7 @@ abstract class ExtractionManager(
     {
         val source = if (paths.ontologyFile != null && paths.ontologyFile.isFile)
         {
-            logger.warning("LOADING ONTOLOGY NOT FROM SERVER, BUT FROM LOCAL FILE ["+paths.ontologyFile+"] - MAY BE OUTDATED - ONLY FOR TESTING!")
+            logger.warn("LOADING ONTOLOGY NOT FROM SERVER, BUT FROM LOCAL FILE ["+paths.ontologyFile+"] - MAY BE OUTDATED - ONLY FOR TESTING!")
             XMLSource.fromFile(paths.ontologyFile, language = Language.Mappings)
         }
         else 
@@ -167,10 +168,10 @@ abstract class ExtractionManager(
         {
             val file = new File(paths.mappingsDir, namespace.name(Language.Mappings).replace(' ','_')+".xml")
             if(!file.exists()) {
-              logger.warning("MAPPING FILE [" + file + "] DOES NOT EXIST! WILL BE IGNORED")
+              logger.warn("MAPPING FILE [" + file + "] DOES NOT EXIST! WILL BE IGNORED")
               return Map[WikiTitle, WikiPage]()
             }
-            logger.warning("LOADING MAPPINGS NOT FROM SERVER, BUT FROM LOCAL FILE ["+file+"] - MAY BE OUTDATED - ONLY FOR TESTING!")
+            logger.warn("LOADING MAPPINGS NOT FROM SERVER, BUT FROM LOCAL FILE ["+file+"] - MAY BE OUTDATED - ONLY FOR TESTING!")
             XMLSource.fromFile(file, language) // TODO: use Language.Mappings?
         }
         else
@@ -216,12 +217,11 @@ abstract class ExtractionManager(
       new { val ontology: Ontology = self.ontology()
             val language: Language = lang
             val mappings: Mappings = self.mappings(lang)
-            val redirects: Redirects = self.redirects.getOrElse(lang, new Redirects(Map()))
+            val redirects: Redirects = self.redirects.getOrElse(lang, new Redirects())
             val disambiguations: Disambiguations = self.disambiguations
             val configFile: ServerConfiguration = Server.config
             val nonFreeImages = Seq()
             val freeImages = Seq()
-            def recorder[T: ClassTag]: ExtractionRecorder[T] = Server.getExtractionRecorder[T](lang)
       }
     }
 
@@ -235,13 +235,12 @@ abstract class ExtractionManager(
         val context = new {
           val ontology: Ontology = self.ontology()
           val language: Language = lang
-          val redirects: Redirects = self.redirects.getOrElse(lang, new Redirects(Map()))
+          val redirects: Redirects = self.redirects.getOrElse(lang, new Redirects())
           val mappingPageSource: Traversable[WikiPage] = self.mappingPageSource(lang)
           val disambiguations: Disambiguations = self.disambiguations
           val configFile: ServerConfiguration = Server.config
           val nonFreeImages = Seq()
           val freeImages = Seq()
-          def recorder[T: ClassTag]: ExtractionRecorder[T] = Server.getExtractionRecorder[T](lang)
         }
 
         MappingsLoader.load(context)

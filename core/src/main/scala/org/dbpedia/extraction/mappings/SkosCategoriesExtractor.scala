@@ -29,7 +29,7 @@ extends PageNodeExtractor
   private val skosBroaderProperty = context.ontology.properties("skos:broader")
   private val skosRelatedProperty = context.ontology.properties("skos:related")
   private val language = context.language
-  private val quad = QuadBuilder.dynamicPredicate(language, DBpediaDatasets.SkosCategories, null) _
+  private val qb = QuadBuilder.dynamicPredicate(language, DBpediaDatasets.SkosCategories, null)
   
   override val datasets = Set(DBpediaDatasets.SkosCategories)
 
@@ -37,12 +37,22 @@ extends PageNodeExtractor
   {
     if(node.title.namespace != Namespace.Category) return Seq.empty
 
-    val softwareAgentUri = SoftwareAgentAnnotation.getAnnotationIri(this.getClass)
-
     var quads = new ArrayBuffer[Quad]()
 
-    quads += new Quad(language, DBpediaDatasets.SkosCategories, subjectUri, rdfTypeProperty, skosConceptClass.uri, node.sourceIri)
-    quads += new Quad(language, DBpediaDatasets.SkosCategories, subjectUri, skosPrefLabelProperty, node.title.decoded, node.sourceIri, new Datatype("rdf:langString"))
+    //generic values
+    qb.setNodeRecord(node.getNodeRecord)
+    qb.setSubject(subjectUri)
+    qb.setSourceUri(node.sourceIri)
+
+    //we need separate QB to ensure correctness
+    val initQb = qb.clone
+    initQb.setExtractor(this.softwareAgentAnnotation)
+
+    initQb.setTriple(subjectUri, rdfTypeProperty, skosConceptClass.uri)
+    quads += initQb.getQuad
+
+    initQb.setTriple(subjectUri, skosPrefLabelProperty, node.title.decoded, new Datatype(Quad.langString))
+    quads += initQb.getQuad
 
     for(link <- collectCategoryLinks(node))
     {
@@ -55,24 +65,19 @@ extends PageNodeExtractor
       
       val objectUri = language.resourceUri.append(link.destination.decodedWithNamespace)
 
-      val q = quad(subjectUri, property, objectUri, link.sourceIri)
-      q.setProvenanceRecord(new DBpediaMetadata(
-        node.getNodeRecord,
-        if(q.dataset != null) Seq(RdfNamespace.fullUri(DBpediaNamespace.DATASET, q.dataset)) else Seq(),
-        Some(ExtractorRecord(
-          softwareAgentUri.toString,
-          ParserRecord(
-            softwareAgentUri.toString, //the software agent creating the object value is the same as the extractor
-            link.root.getOriginWikiText(link.line),
-            link.toWikiText,
-            objectUri
-          ),
-          None, None, None, None
-        )),
-        None,
-        Seq.empty
+      qb.setExtractor(ExtractorRecord(
+        this.softwareAgentAnnotation,
+        Seq(ParserRecord(
+          this.softwareAgentAnnotation,     //the software agent creating the object value is the same as the extractor
+          link.root.getOriginWikiText(link.line),
+          link.toWikiText,
+          objectUri
+        ))
       ))
-      quads += q
+      qb.setTriple(subjectUri, property, objectUri)
+      qb.setSourceUri(link.sourceIri)
+
+      quads += qb.getQuad
     }
     quads
   }

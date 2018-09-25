@@ -185,9 +185,8 @@ class Mappings(@PathParam("lang") langCode : String)
       val context = new {
         val ontology = Server.instance.extractor.ontology()
         val language = lang
-        val redirects: Redirects = new Redirects(Map())
+        val redirects: Redirects = new Redirects()
         val mappingPageSource = page
-        def recorder[T: ClassTag]: ExtractionRecorder[T] = Server.getExtractionRecorder[T](lang)
       }
 
       //Load mappings

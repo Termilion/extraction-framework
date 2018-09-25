@@ -23,11 +23,10 @@ class HybridRawAndMappingExtractor(
     def language : Language
     def mappings : Mappings
     def redirects : Redirects
-    def recorder[T: ClassTag] : ExtractionRecorder[T]
   }
 )
 extends PageNodeExtractor {
-  private val rawinfoboxExtractor = new InfoboxExtractor(context)
+  private val rawinfoboxExtractor = new ExtendedInfoboxExtractor(context)
   private val mappingExtractor = new MappingExtractor(context)
   private val language = context.language
 

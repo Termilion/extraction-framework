@@ -1,20 +1,21 @@
 package org.dbpedia.extraction.server.resources.stylesheets
 
 import xml.Elem
-import javax.ws.rs.{GET, Produces, Path}
-import org.dbpedia.extraction.destinations.formatters.{Formatter,TriXFormatter}
+import javax.ws.rs.{GET, Path, Produces}
+
+import org.dbpedia.extraction.destinations.formatters.{Formatter, TriXFormatter}
 import java.io.Writer
 
 object TriX
 {
-    /**
-     * @param number of "../" steps to prepend to the path to "stylesheets/trix.xsl"
-     */
-    def writeHeader(writer: Writer, parents : Int): Formatter = 
-    {
-      writer.write("<?xml-stylesheet type=\"text/xsl\" href=\""+("../"*parents)+"stylesheets/trix.xsl\"?>\n")
-      new TriXFormatter(true)
-    }
+  /**
+   * @param number of "../" steps to prepend to the path to "stylesheets/trix.xsl"
+   */
+  def writeHeader(writer: Writer, parents : Int): Formatter =
+  {
+    writer.write("<?xml-stylesheet type=\"text/xsl\" href=\""+("../"*parents)+"stylesheets/trix.xsl\"?>\n")
+    new TriXFormatter(true)
+  }
 }
 
 @Path("/stylesheets/trix.xsl")
@@ -30,9 +31,10 @@ class TriX
     */
     @GET
     @Produces(Array("text/xsl"))
-    def get : Elem =
+    def get() : Elem =
     {
-        <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:trix="http://www.w3.org/2004/03/trix/trix-1/">
+
+          <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:trix="http://www.w3.org/2004/03/trix/trix-1/">
           <xsl:template match="/trix:TriX">
             <html>
               <head>
@@ -79,6 +81,19 @@ class TriX
           <!-- generate links from <uri> elements -->
           <xsl:template match="trix:uri">
             <td><a href="{.}"><xsl:value-of select="."/></a></td>
+          </xsl:template>
+
+
+          <!-- just display text for other elements -->
+          <xsl:template match="trix:typedLiteral">
+            <xsl:variable name="type" select="./@datatype"/>
+            <td><xsl:value-of select="."/><sup> (<xsl:value-of select="$type"/>)</sup></td>
+          </xsl:template>
+
+          <!-- just display text for other elements -->
+          <xsl:template match="trix:plainLiteral">
+            <xsl:variable name="lang" select="./@xml:lang"/>
+            <td><xsl:value-of select="."/><sup> (@<xsl:value-of select="$lang"/>)</sup></td>
           </xsl:template>
 
           <!-- just display text for other elements -->

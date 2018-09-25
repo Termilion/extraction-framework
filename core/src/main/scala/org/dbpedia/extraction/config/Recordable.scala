@@ -1,15 +1,16 @@
 package org.dbpedia.extraction.config
 
+import org.apache.log4j.Level
 import org.dbpedia.extraction.transform.Quad
 import org.dbpedia.extraction.util.Language
-import org.dbpedia.extraction.wikiparser.PageNode
+import org.dbpedia.extraction.wikiparser.{Node, PageNode}
 
 /**
   * Interface for objects which need to ba handled by the ExtractionRecorder (e.g. WikiPage, PageNode, Quad, Provenance etc.)
   */
 trait Recordable[T] {
-  val id: Long
-  def recordEntries: List[RecordEntry[T]]
+  def id: Long
+  def recordEntries: Seq[RecordEntry[T]]
 }
 
 
@@ -17,37 +18,45 @@ trait Recordable[T] {
   * This class provides the necessary attributes to record either a successful or failed extraction
   *
   * @param record - the Recordable
-  * @param cause - the cause for recording it
   * @param language - optional language of the recordable
   * @param msg - optional message
   * @param error - the throwable causing this record
-  * @param logSuccessfulPage
+  * @param level - log4j level
   */
 case class RecordEntry[T] (
-     record: Recordable[T],
-     cause: RecordCause.Value = RecordCause.Info,
-     language: Language = Language.None,
-     msg: String= null,
-     error:Throwable = null,
-     logSuccessfulPage:Boolean = false
+    record: Recordable[T],
+    language: Language = Language.None,
+    msg: String= null,
+    error:Throwable = null,
+    level: Level = Level.TRACE
  )
 
-/**
-  *
-  */
-object RecordCause extends Enumeration {
-  val Provenance, Internal, Info, Warning, Exception = Value
+object RecordEntry{
+  def copyEntry[T](record: RecordEntry[T]): RecordEntry[T] ={
+    RecordEntry[T] (
+      null.asInstanceOf[Recordable[T]],
+      record.language,
+      record.msg,
+      record.error,
+      record.level
+    )
+  }
 }
 
-class WikiPageEntry(p : PageNode, cause: RecordCause.Value = RecordCause.Info) extends RecordEntry[PageNode](
+class NodeEntry(p : Node, level: Level = Level.TRACE) extends RecordEntry[Node](
   record = p,
-  cause = cause,
+  level = level
+)
+
+class WikiPageEntry(p : PageNode, level: Level = Level.TRACE) extends RecordEntry[Node](
+  record = p,
+  level = level,
   language = p.title.language
 )
 
-class QuadEntry(q : Quad, cause: RecordCause.Value = RecordCause.Info) extends RecordEntry[Quad](
+class QuadEntry(q : Quad, level: Level = Level.TRACE) extends RecordEntry[Quad](
   record = q,
-  cause = cause,
+  level = level,
   language = Option(q.language) match{
     case Some(l) => Language(l)
     case None => Language.None
@@ -56,15 +65,15 @@ class QuadEntry(q : Quad, cause: RecordCause.Value = RecordCause.Info) extends R
 
 class DefaultEntry(
   msg: String,
-  cause: RecordCause.Value = RecordCause.Info,
   error:Throwable = null,
-  language: Language = Language.None
+  language: Language = Language.None,
+  level: Level
 ) extends RecordEntry[DefaultRecordable](
   record = new DefaultRecordable,
-  cause = cause,
   language = Language.None,
   msg,
-  error
+  error,
+  level
 )
 
 private[config] class DefaultRecordable extends Recordable[DefaultRecordable]{

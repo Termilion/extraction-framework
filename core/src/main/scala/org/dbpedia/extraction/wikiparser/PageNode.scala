@@ -1,10 +1,14 @@
 package org.dbpedia.extraction.wikiparser
 
+import org.apache.log4j.Level
+import org.dbpedia.extraction.annotations.WikiNodeAnnotation
 import org.dbpedia.extraction.config._
 import org.dbpedia.extraction.config.provenance.NodeRecord
 import org.dbpedia.extraction.dataparser.RedirectFinder
-import org.dbpedia.extraction.util.Language
-import org.dbpedia.extraction.wikiparser.impl.wikipedia.Disambiguation
+import org.dbpedia.extraction.util.StringUtils.escape
+import org.dbpedia.extraction.util.{Language, WikiUtil}
+import org.dbpedia.extraction.wikiparser.impl.wikipedia.{CategoryRedirect, Disambiguation}
+import org.dbpedia.iri.IRI
 
 import scala.collection.mutable.ListBuffer
 import scala.xml.Elem
@@ -20,48 +24,30 @@ import scala.xml.Elem
  * @param contributorName The name of the latest contributor
  * @param childNodes The contents of this page
  */
+@WikiNodeAnnotation(classOf[PageNode])
 class PageNode (
-  val title: WikiTitle,
-  val id: Long,
-  val revision: Long,
-  val timestamp: Long,
-  val contributorID: Long,
-  val contributorName: String,
-  val source: String,
-  private var childNodes: List[Node] = List()
+   val title: WikiTitle,
+   override val id: Long,
+   val revision: Long,
+   val timestamp: Long,
+   val contributorID: Long,
+   val contributorName: String,
+   val source: String,
+   private var childNodes: List[Node] = List()
 ) 
-extends Node with Recordable[PageNode]
+extends Node with Recordable[Node]
 {
   override def children: List[Node] = childNodes
 
   override val line = 0
 
-  private var extractionRecords: ListBuffer[RecordEntry[PageNode]] = null
-  override def recordEntries: List[RecordEntry[PageNode]] = {
-    if(extractionRecords == null || extractionRecords.isEmpty)
-      List(new WikiPageEntry(this, RecordCause.Internal))
-    else
-      extractionRecords.toList
-  }
-
-  private[extraction] def addExtractionRecord(recordEntry: RecordEntry[_]): Unit ={
-    assert(recordEntry != null)
-    if(extractionRecords == null)
-      extractionRecords = new ListBuffer[RecordEntry[PageNode]]()
-    recordEntry match{
-      case re: RecordEntry[PageNode] => extractionRecords.append(re)
-      case de: RecordEntry[DefaultEntry] => extractionRecords.append(new RecordEntry[PageNode](this, de.cause, Option(de.language).getOrElse(Language.None), de.msg, de.error))
-      case _ =>
-    }
-  }
-
   private[extraction] def recordError(msg: String): Unit =
-    addExtractionRecord(new RecordEntry[PageNode](this, RecordCause.Warning, this.title.language, msg))
+    addExtractionRecord(new RecordEntry[Node](this, this.title.language, msg, null, Level.WARN))
   private[extraction] def recordException(ex: Throwable, msg: String = null): Unit =
-    addExtractionRecord(new RecordEntry[PageNode](this, RecordCause.Exception, this.title.language, if(msg != null) msg else ex.getMessage, ex))
+    addExtractionRecord(new RecordEntry[Node](this, this.title.language, if(msg != null) msg else ex.getMessage, ex, Level.ERROR))
   private[extraction] def recordMessage(msg: String): Unit =
-    addExtractionRecord(new RecordEntry[PageNode](this, RecordCause.Info, this.title.language, msg))
-  private[extraction] def recordProvenance = ???
+    addExtractionRecord(new RecordEntry[Node](this, this.title.language, msg, null, Level.INFO))
+  private[extraction] def recordProvenance = ???   //TODO
 
   def toWikiText: String = children.map(_.toWikiText).mkString
 
@@ -87,16 +73,19 @@ extends Node with Recordable[PageNode]
 
   lazy val redirect: WikiTitle = {
     val rf = RedirectFinder.getRedirectFinder(title.language)
-    rf.apply(this) match{
-      case Some(d) => d._2
-      case None => null.asInstanceOf[WikiTitle]   //legacy
+    rf.apply(this) match {
+      case Some((_, targetTitle)) => targetTitle
+      case None => null.asInstanceOf[WikiTitle] //legacy
     }
   }
 
   def isDisambiguation: Boolean ={
+    //look up the disambig templates for the given language -> then just check if these exist in the page
     val disambiguationNames = Disambiguation.get(this.title.language).getOrElse(Set("Disambig"))
     children.exists(node => node.hasTemplate(disambiguationNames))
   }
+
+  def isCategory: Boolean = this.title.namespace == Namespace.Category
 
   //Generate the page URI
   lazy val uri: String = this.title.language.resourceUri.append(this.title.decodedWithNamespace)
@@ -110,11 +99,23 @@ extends Node with Recordable[PageNode]
       case _ => false
   }
 
-  def getNodeRecord = NodeRecord(
-    uri = this.uri,
-    revision = this.revision,
-    namespace = this.title.namespace.code,
-    line = this.line,
-    language = this.title.language.wikiCode
+  /**
+    * Creates a NodeRecord metadata object of this node
+    *
+    * @return
+    */
+  override def getNodeRecord = NodeRecord(
+    IRI.create(this.sourceIri).get,
+    this.wikiNodeAnnotation,
+    this.root.revision,
+    this.root.title.namespace.code,
+    this.id,
+    this.root.title.language,
+    Option(this.line),
+    None,
+    if(section != null)
+      Some(escape(null, WikiUtil.cleanSpace(section.name), Node.fragmentEscapes).toString)
+    else
+      None
   )
 }

@@ -2,11 +2,14 @@ package org.dbpedia.extraction.mappings
 
 import java.io._
 import java.net.URL
-import java.util.logging.{Level, Logger}
 
+import org.apache.log4j.{Level, Logger}
 import org.dbpedia.extraction.annotations.{AnnotationType, SoftwareAgentAnnotation}
+import org.dbpedia.extraction.config.{ExtractionLogger, ExtractionRecorder}
 import org.dbpedia.extraction.config.provenance.DBpediaDatasets
+import org.dbpedia.extraction.mappings.MappingsLoader.getClass
 import org.dbpedia.extraction.ontology.Ontology
+import org.dbpedia.extraction.ontology.datatypes.Datatype
 import org.dbpedia.extraction.transform.{Quad, QuadBuilder}
 import org.dbpedia.extraction.util.Language
 import org.dbpedia.extraction.wikiparser._
@@ -56,7 +59,7 @@ extends PageNodeExtractor
 
     private val language = context.language.wikiCode
 
-    private val logger = Logger.getLogger(classOf[AbstractExtractor].getName)
+  private val logger = ExtractionLogger.getLogger(getClass, context.language)
 
     //private val apiParametersFormat = "uselang="+language+"&format=xml&action=parse&prop=text&title=%s&text=%s"
     private val apiParametersFormat = "uselang="+language+"&format=xml&action=query&prop=extracts&exintro=&explaintext=&titles=%s"
@@ -67,8 +70,8 @@ extends PageNodeExtractor
     // lazy so testing does not need ontology
     private lazy val longProperty = context.ontology.properties("abstract")
 
-    private lazy val longQuad = QuadBuilder(context.language, DBpediaDatasets.MissingLongAbstracts, longProperty, null) _
-    private lazy val shortQuad = QuadBuilder(context.language, DBpediaDatasets.MissingShortAbstracts, shortProperty, null) _
+    private lazy val longQuad = QuadBuilder(context.language, DBpediaDatasets.MissingLongAbstracts, longProperty, new Datatype(Quad.langString))
+    private lazy val shortQuad = QuadBuilder(context.language, DBpediaDatasets.MissingShortAbstracts, shortProperty, new Datatype(Quad.langString))
 
     override val datasets = Set(DBpediaDatasets.MissingLongAbstracts, DBpediaDatasets.MissingShortAbstracts)
 
@@ -113,14 +116,22 @@ extends PageNodeExtractor
           val shortText = short(text)
 
           //Create statements
-          val quadLong = longQuad(subjectUri, text, pageNode.sourceIri)
-          val quadShort = shortQuad(subjectUri, shortText, pageNode.sourceIri)
+          longQuad.setNodeRecord(pageNode.getNodeRecord)
+          longQuad.setExtractor(this.softwareAgentAnnotation.toString)
+          shortQuad.setNodeRecord(pageNode.getNodeRecord)
+          shortQuad.setExtractor(this.softwareAgentAnnotation)
+          longQuad.setSubject(subjectUri)
+          longQuad.setValue(text)
+          longQuad.setSourceUri(pageNode.sourceIri)
+          shortQuad.setSubject(subjectUri)
+          shortQuad.setValue(shortText)
+          shortQuad.setSourceUri(pageNode.sourceIri)
 
           if (shortText.isEmpty) {
-            Seq(quadLong)
+            Seq(longQuad.getQuad)
           }
           else {
-            Seq(quadLong, quadShort)
+            Seq(longQuad.getQuad, shortQuad.getQuad)
           }
         }
     }
@@ -363,7 +374,7 @@ extends PageNodeExtractor
 }
 
 object MissingAbstractsExtractor {
-  private val logger = Logger.getLogger(classOf[MissingAbstractsExtractor].getName)
+  private val logger = ExtractionLogger.getLogger(getClass, Language.None)
 
   /**
    * List of all characters which are reserved in a query component according to RFC 2396
@@ -390,7 +401,7 @@ object MissingAbstractsExtractor {
       new BufferedReader(new FileReader("existing-abstracts.tsv"))
     }
     catch {
-      case e: FileNotFoundException => logger.severe(s"Unable to find file '${file.getAbsolutePath}'." +
+      case e: FileNotFoundException => logger.fatal(s"Unable to find file '${file.getAbsolutePath}'." +
         s"Please generate it and put it in the given location.")
         throw e
       case e : Throwable => throw e

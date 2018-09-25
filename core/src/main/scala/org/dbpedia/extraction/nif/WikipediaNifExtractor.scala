@@ -1,13 +1,15 @@
 package org.dbpedia.extraction.nif
 
-import org.dbpedia.extraction.config.{Config, RecordCause, RecordEntry}
+import org.apache.log4j.Level
+import org.dbpedia.extraction.config.{Config, ExtractionLogger, RecordEntry}
 import org.dbpedia.extraction.config.provenance.DBpediaDatasets
+import org.dbpedia.extraction.ontology.datatypes.Datatype
 import org.dbpedia.extraction.ontology.{Ontology, OntologyProperty, RdfNamespace}
 import org.dbpedia.extraction.transform.{Quad, QuadBuilder}
 import org.dbpedia.extraction.util.Language
-import org.dbpedia.extraction.wikiparser.{Namespace, PageNode, WikiPage}
+import org.dbpedia.extraction.wikiparser.{Namespace, Node, WikiPage}
 import org.dbpedia.extraction.wikiparser.impl.wikipedia.Namespaces
-import org.jsoup.nodes.{Document, Element, Node}
+import org.jsoup.nodes.{Document, Element}
 import org.jsoup.select.Elements
 
 import scala.collection.convert.decorateAsScala._
@@ -27,13 +29,15 @@ class WikipediaNifExtractor(
      wikiPage: WikiPage
    ) extends HtmlNifExtractor(
       wikiPage.uri + "?dbpv=" + context.configFile.dbPediaVersion + "&nif=context",
-      context.language.isoCode,
+      context.language,
       context.configFile.nifParameters
   ) {
 
   /**
     * DBpedia relevant properties
     */
+
+  private val logger = ExtractionLogger.getLogger(getClass, context.language)
 
   // lazy so testing does not need ontology
   protected lazy val shortProperty: OntologyProperty = context.ontology.properties(context.configFile.abstractParameters.shortAbstractsProperty)
@@ -42,8 +46,8 @@ class WikipediaNifExtractor(
   protected lazy val longProperty: OntologyProperty = context.ontology.properties(context.configFile.abstractParameters.longAbstractsProperty)
 
   protected val dbpediaVersion: String = context.configFile.dbPediaVersion
-  protected lazy val longQuad: (String, String, String) => Quad = QuadBuilder(context.language, DBpediaDatasets.LongAbstracts, longProperty, null) _
-  protected lazy val shortQuad: (String, String, String) => Quad = QuadBuilder(context.language, DBpediaDatasets.ShortAbstracts, shortProperty, null) _
+  protected lazy val longQuad: (String, String, String) => Quad = QuadBuilder.applySimple(context.language, DBpediaDatasets.LongAbstracts, longProperty, new Datatype(Quad.langString))
+  protected lazy val shortQuad: (String, String, String) => Quad = QuadBuilder.applySimple(context.language, DBpediaDatasets.ShortAbstracts, shortProperty, new Datatype(Quad.langString))
   protected val recordAbstracts: Boolean = !context.configFile.nifParameters.isTestRun  //not! will create dbpedia short and long abstracts
   protected val shortAbstractLength: Int = context.configFile.abstractParameters.shortAbstractMinLength
   protected val abstractsOnly: Boolean = context.configFile.nifParameters.abstractsOnly
@@ -53,10 +57,7 @@ class WikipediaNifExtractor(
   }
 
   def extractNif(html: String)(exceptionHandle: RecordEntry[WikiPage] => Unit): Seq[Quad] = {
-    super.extractNif(wikiPage.sourceIri, wikiPage.uri, html){ (msg:String, severity:RecordCause.Value, error:Throwable) =>
-      //deal with any exception recorded in the super class
-      new RecordEntry[PageNode](wikiPage, severity, context.language, msg, error)
-    }
+    super.extractNif(wikiPage.sourceIri, wikiPage.uri, html)
   }
 
   /**
@@ -200,19 +201,19 @@ class WikipediaNifExtractor(
     tocMap
   }
 
-  private def isWikiPageEnd(node: Node): Boolean ={
+  private def isWikiPageEnd(node: org.jsoup.nodes.Node): Boolean ={
     cssSelectorTest(node, cssSelectorConfigMap.findPageEnd)
   }
 
-  private def isWikiToc(node: Node): Boolean ={
+  private def isWikiToc(node: org.jsoup.nodes.Node): Boolean ={
     cssSelectorTest(node, cssSelectorConfigMap.findToc)
   }
 
-  private def isWikiNextTitle(node: Node): Boolean ={
+  private def isWikiNextTitle(node: org.jsoup.nodes.Node): Boolean ={
     cssSelectorTest(node, cssSelectorConfigMap.nextTitle)
   }
 
-  private def cssSelectorTest(node: Node, queries: Seq[String]): Boolean ={
+  private def cssSelectorTest(node: org.jsoup.nodes.Node, queries: Seq[String]): Boolean ={
     val doc = Document.createShell("").appendChild(node)
     val test: Elements = new Elements()
     for( query: String <- queries )

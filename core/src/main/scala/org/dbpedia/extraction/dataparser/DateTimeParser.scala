@@ -1,8 +1,9 @@
 package org.dbpedia.extraction.dataparser
 
+import org.apache.log4j.Level
 import org.dbpedia.extraction.annotations.{AnnotationType, SoftwareAgentAnnotation}
 import org.dbpedia.extraction.ontology.datatypes.Datatype
-import org.dbpedia.extraction.config.{ExtractionRecorder, RecordCause, RecordEntry}
+import org.dbpedia.extraction.config.{ExtractionLogger, RecordEntry}
 import org.dbpedia.extraction.wikiparser._
 import org.dbpedia.extraction.config.dataparser.{DataParserConfig, DateTimeParserConfig}
 import org.dbpedia.extraction.util.{Date, Language}
@@ -10,7 +11,7 @@ import org.dbpedia.extraction.mappings.Redirects
 import org.dbpedia.extraction.ontology.Ontology
 
 import scala.language.reflectiveCalls
-import scala.reflect.ClassTag
+import scala.util.{Failure, Success, Try}
 
 /**
   * Parse date time
@@ -23,15 +24,14 @@ import scala.reflect.ClassTag
 class DateTimeParser ( context : {
       def language : Language
       def ontology : Ontology
-      def redirects : Redirects
-      def recorder[T: ClassTag] : ExtractionRecorder[T] },
+      def redirects : Redirects },
      datatype : Datatype,
      val strict : Boolean = false,
      val tryMinorTypes : Boolean = false) extends DataParser[Date]
 {
     require(datatype.!=(null), "datatype != null")
 
-  private val recorder = context.recorder[PageNode]
+  private val logger = ExtractionLogger.getLogger(getClass, context.language)
 
   //datatypes
   val dtDate: Datatype = context.ontology.getOntologyDatatype("xsd:date").get
@@ -114,8 +114,10 @@ class DateTimeParser ( context : {
       }
       catch
       {
-          case ex : IllegalArgumentException  => recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Exception, Language.getOrElse(language, Language.None), "Error while parsing date", ex))
-          case ex : NumberFormatException => recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Exception, Language.getOrElse(language, Language.None), "Error while parsing date", ex))
+          case ex : IllegalArgumentException  =>
+            logger.debug(node.root, Language.getOrElse(language, Language.None), ex, "Error while parsing date")
+          case ex : NumberFormatException =>
+            logger.debug(node.root, Language.getOrElse(language, Language.None), ex, "Error while parsing date")
       }
 
       None
@@ -166,7 +168,7 @@ class DateTimeParser ( context : {
             }
         }
 
-      recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Internal, Language.getOrElse(language, Language.None), "Template unknown: " + node.title))
+      logger.record(new RecordEntry[Node](node.root, Language.getOrElse(language, Language.None), "Template unknown: " + node.title, null, Level.DEBUG))
       None
     }
 
@@ -216,7 +218,7 @@ class DateTimeParser ( context : {
         case Some(_) =>
       }
       if(year.nonEmpty)
-        Some.apply(new Date(year, month, day, dt))
+        Try(new Date(year, month, day, dt)).toOption
       else
         None
     }
@@ -232,10 +234,10 @@ class DateTimeParser ( context : {
         datatype match
         {
             case `dtDay` =>
-              recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Internal, Language.getOrElse(language, Language.None), "Method for day Extraction not yet implemented."))
+              logger.debug(node.root, Language.getOrElse(language, Language.None), null, "Method for day Extraction not yet implemented.")
               None
             case `dtMonth` =>
-              recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Internal, Language.getOrElse(language, Language.None), "Method for day Extraction not yet implemented."))
+              logger.debug(node.root, Language.getOrElse(language, Language.None), null, "Method for day Extraction not yet implemented.")
               None
             case `dtYear` =>
                 for(date <- catchMonthYear(input, node))
@@ -275,9 +277,9 @@ class DateTimeParser ( context : {
             }
             months.get(month.toLowerCase) match
             {
-                case Some(monthNumber) => return Some.apply(new Date(Some.apply((century+year).toInt), Some.apply(monthNumber.toInt), Some.apply(day.toInt), datatype))
+                case Some(monthNumber) => return Try(new Date(Some.apply((century+year).toInt), Some.apply(monthNumber.toInt), Some.apply(day.toInt), datatype)).toOption
                 case None =>
-                  recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Internal, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
+                  logger.debug(new RecordEntry[Node](node.root, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
             }
         }
 
@@ -286,8 +288,8 @@ class DateTimeParser ( context : {
             val eraIdentifier: _root_.scala.Predef.String = getEraSign(era)
             months.get(month.toLowerCase) match
             {
-                case Some(monthNumber) => return Some.apply(new Date(Some.apply((eraIdentifier+year).toInt), Some.apply(monthNumber), Some.apply(day.toInt), datatype))
-                case None => recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Internal, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
+                case Some(monthNumber) => return Try(new Date(Some.apply((eraIdentifier+year).toInt), Some.apply(monthNumber), Some.apply(day.toInt), datatype)).toOption
+                case None => logger.debug(new RecordEntry[Node](node.root, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
             }
         }
 
@@ -296,14 +298,14 @@ class DateTimeParser ( context : {
             val eraIdentifier: _root_.scala.Predef.String = getEraSign(era)
             months.get(month.toLowerCase) match
             {
-                case Some(monthNumber) => return Some.apply(new Date(Some.apply((eraIdentifier+year).toInt), Some.apply(monthNumber), Some.apply(day.toInt), datatype))
-                case None => recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Internal, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
+                case Some(monthNumber) => return Try(new Date(Some.apply((eraIdentifier+year).toInt), Some.apply(monthNumber), Some.apply(day.toInt), datatype)).toOption
+                case None => logger.debug(new RecordEntry[Node](node.root, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
             }
         }
 
         for(DateRegex4(day, month, year) <- List.apply(input))
         {
-            return Some.apply(new Date(Some.apply(year.toInt), Some.apply(month.toInt), Some.apply(day.toInt), datatype))
+            return Try(new Date(Some.apply(year.toInt), Some.apply(month.toInt), Some.apply(day.toInt), datatype)).toOption
         }
 
         for(DateRegex5(day, month, year) <- List.apply(input))
@@ -311,38 +313,38 @@ class DateTimeParser ( context : {
             try
             {
                 val monthNumber: Int = months.apply(month.toLowerCase)
-                return Some.apply(new Date(Some.apply(year.toInt), Some.apply(monthNumber), Some.apply(day.toInt), datatype))
+                return Try(new Date(Some.apply(year.toInt), Some.apply(monthNumber), Some.apply(day.toInt), datatype)).toOption
             }
             catch
             {
                 case ex: NoSuchElementException =>
-                  recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Internal, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
+                  logger.debug(new RecordEntry[Node](node.root, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
             }
         }
 
         for(DateRegex6(year, month, day) <- List.apply(input))
         {
-            return Some.apply(new Date(Some.apply(year.toInt), Some.apply(month.toInt), Some.apply(day.toInt), datatype))
+            return Try(new Date(Some.apply(year.toInt), Some.apply(month.toInt), Some.apply(day.toInt), datatype)).toOption
         }
 
         for(DateRegex7(day, month, year) <- List.apply(input))
         {
-            return Some.apply(new Date(Some.apply(year.toInt), Some.apply(month.toInt), Some.apply(day.toInt), datatype))
+            return Try(new Date(Some.apply(year.toInt), Some.apply(month.toInt), Some.apply(day.toInt), datatype)).toOption
         }
 
         for(DateRegex8(year, month, day) <- List.apply(input))
         {
             months.get(month.toLowerCase) match
             {
-              case Some(monthNumber) => return Some.apply(new Date(Some.apply(year.toInt), Some.apply(monthNumber), Some.apply(day.toInt), datatype))
+              case Some(monthNumber) => return Try(new Date(Some.apply(year.toInt), Some.apply(monthNumber), Some.apply(day.toInt), datatype)).toOption
               case None =>
-                recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Internal, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
+                logger.debug(new RecordEntry[Node](node.root, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
             }
         }
 
       if(tryMinorTypes)
         catchMonthYear(input, node) match{
-          case Some(d) => Some.apply(new Date(year = d.year, month = d.month, day= Some.apply(1), datatype = dtDate))
+          case Some(d) => Try(new Date(year = d.year, month = d.month, day= Some.apply(1), datatype = dtDate)).toOption
           case None => None
         }
       else
@@ -357,9 +359,9 @@ class DateTimeParser ( context : {
             val day: _root_.scala.Predef.String = result.group(2)
             months.get(month.toLowerCase) match
             {
-                case Some(monthNumber) => return Some.apply(new Date(month = Some.apply(monthNumber), day = Some.apply(day.toInt), datatype = dtMonthDay))
+                case Some(monthNumber) => return Try(new Date(month = Some.apply(monthNumber), day = Some.apply(day.toInt), datatype = dtMonthDay)).toOption
                 case None =>
-                  recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Internal, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
+                  logger.debug(new RecordEntry[Node](node.root, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
             }
         }
         for(result <- DayMonthRegex2.findFirstMatchIn(input))
@@ -368,9 +370,9 @@ class DateTimeParser ( context : {
             val month: _root_.scala.Predef.String = result.group(4)
             months.get(month.toLowerCase) match
             {
-                case Some(monthNumber) => return Some.apply(new Date(month = Some.apply(monthNumber), day = Some.apply(day.toInt), datatype = dtMonthDay))
+                case Some(monthNumber) => return Try(new Date(month = Some.apply(monthNumber), day = Some.apply(day.toInt), datatype = dtMonthDay)).toOption
                 case None =>
-                  recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Internal, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
+                  logger.debug(new RecordEntry[Node](node.root, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
             }
         }
         None
@@ -386,14 +388,14 @@ class DateTimeParser ( context : {
             val eraIdentifier: _root_.scala.Predef.String = getEraSign(era)
             months.get(month.toLowerCase) match
             {
-                case Some(monthNumber) => return Some.apply(new Date(year = Some.apply((eraIdentifier+year).toInt), month = Some.apply(monthNumber), datatype = dtYearMonth))
+                case Some(monthNumber) => return Try(new Date(year = Some.apply((eraIdentifier+year).toInt), month = Some.apply(monthNumber), datatype = dtYearMonth)).toOption
                 case None =>
-                  recorder.enterProblemRecord(new RecordEntry[PageNode](node.root, RecordCause.Internal, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
+                  logger.debug(new RecordEntry[Node](node.root, Language.getOrElse(language, Language.None), "Month with name '"+month+"' (language: "+language+") is unknown"))
             }
         }
         if(tryMinorTypes)
           catchYear(input) match{
-            case Some(d) => Some.apply(new Date(year = d.year, month = Some.apply(1), day= Some.apply(1), datatype = dtDate))
+            case Some(d) => Try(new Date(year = d.year, month = Some.apply(1), day= Some.apply(1), datatype = dtDate)).toOption
             case None =>
           }
         None
@@ -405,13 +407,13 @@ class DateTimeParser ( context : {
         {
             val year: _root_.scala.Predef.String = result.group(1)
             val eraIdentifier: _root_.scala.Predef.String = getEraSign(result.group(2))
-            return Some.apply(new Date(year = Some.apply((eraIdentifier+year).toInt), datatype = dtYear))
+            return Try(new Date(year = Some.apply((eraIdentifier+year).toInt), datatype = dtYear)).toOption
         }
         for(result <- YearRegex2.findFirstMatchIn(input))
         {
             val year: _root_.scala.Predef.String = result.group(2)
             val eraIdentifier: _root_.scala.Predef.String = getEraSign(result.group(1))
-            return Some.apply(new Date(year = Some.apply((eraIdentifier+year).toInt), datatype = dtYear))
+            return Try(new Date(year = Some.apply((eraIdentifier+year).toInt), datatype = dtYear)).toOption
         }
         None
     }

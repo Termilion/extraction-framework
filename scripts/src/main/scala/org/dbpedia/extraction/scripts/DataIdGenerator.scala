@@ -6,13 +6,13 @@ import java.nio.charset.Charset
 import java.security.InvalidParameterException
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.logging.{Level, Logger}
 
 import org.apache.http.client.utils.URLEncodedUtils
 import org.apache.jena.atlas.json.{JSON, JsonObject}
 import org.apache.jena.rdf.model._
 import org.apache.jena.vocabulary.RDF
-import org.dbpedia.extraction.config.Config
+import org.apache.log4j.{Level, Logger}
+import org.dbpedia.extraction.config.{Config, ExtractionLogger, ExtractionRecorder}
 import org.dbpedia.extraction.config.provenance.{DBpediaDatasets, Dataset}
 import org.dbpedia.extraction.util.{Language, OpenRdfUtils}
 import org.dbpedia.iri.UriUtils
@@ -32,7 +32,7 @@ import scala.util.{Failure, Success}
   */
 object DataIdGenerator {
 
-  private val logger = Logger.getLogger(getClass.getName)
+  private val logger = ExtractionLogger.getLogger(getClass, Language.None)
 
   //todo change external instances of lexvo to DBpedia+ worldfact ids
   private val dateformat = new SimpleDateFormat("yyyy-MM-dd")
@@ -206,7 +206,7 @@ object DataIdGenerator {
     }
     //run through all dataset again to add dataset relations
     if(pagesArticles != null) {
-      val pagesArticlesResource = mainModel.createResource(pagesArticles.versionUri)
+      val pagesArticlesResource = mainModel.createResource(pagesArticles.versionUri.toString)
       for (dis <- lbpMap.keys.toList.sorted) {
         if (dis.contains("_" + dir.getName)) {
           if (lastFile != dis.substring(0, dis.lastIndexOf("_" + dir.getName))) {
@@ -214,7 +214,7 @@ object DataIdGenerator {
             lastFile = dis.substring(0, dis.lastIndexOf("_" + dir.getName))
             Option(getDataset(dis, lang)) match {
               case Some(d) =>
-                val dResource = mainModel.createResource(d.versionUri)
+                val dResource = mainModel.createResource(d.versionUri.toString)
                 val relation = mainModel.createResource(d.getRelationUri("source", pagesArticles))
                 mainModel.add(dResource, getProperty("dataid", "relatedDataset"), pagesArticlesResource)
                 mainModel.add(dResource, getProperty("dataid", "qualifiedDatasetRelation"), relation)
@@ -339,14 +339,14 @@ object DataIdGenerator {
           case z if z.contains("bz2") => "application/x-bzip2"
           case "sparql" => "application/sparql-results+xml"
           case _ =>
-            logger.log(Level.SEVERE, "outer MediaType could not be determined: " + outer)
+            logger.log(Level.FATAL, "outer MediaType could not be determined: " + outer)
             null
         })
         val oe = Option(outer match {
           case y if y.contains("gz") => ".gz"
           case z if z.contains("bz2") => ".bz2"
           case _ =>
-            logger.log(Level.WARNING, "outer file extension could not be determined: " + outer)
+            logger.log(Level.WARN, "outer file extension could not be determined: " + outer)
             null
         })
         val i = Option(inner match {
@@ -355,7 +355,7 @@ object DataIdGenerator {
           case nt if nt.contains("nt") => "application/n-triples"
           case xml if xml.contains("xml") => "application/xml"
           case _ =>
-            logger.log(Level.WARNING, "inner MediaType could not be determined: " + inner)
+            logger.log(Level.WARN, "inner MediaType could not be determined: " + inner)
             null
         })
         val ie = Option(inner match {
@@ -364,7 +364,7 @@ object DataIdGenerator {
           case nt if nt.contains("nt") => ".nt"
           case xml if xml.contains("xml") => "application/xml"
           case _ =>
-            logger.log(Level.WARNING, "inner file extension could not be determined: " + inner)
+            logger.log(Level.WARN, "inner file extension could not be determined: " + inner)
             null
         })
 
@@ -521,7 +521,7 @@ object DataIdGenerator {
   }
 
   def addDataset(model: Model, lang: Language, dataset: Dataset, associatedAgent: Resource, lbpMap: Map[String, String], superset: Boolean): Resource = {
-    val datasetUri = model.createResource(dataset.versionUri)
+    val datasetUri = model.createResource(dataset.versionUri.toString)
     //add dataset to catalog
     catalogModel.add(catalogInUse, getProperty("dcat", "dataset"), datasetUri)
     if(superset) {

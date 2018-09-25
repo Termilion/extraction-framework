@@ -4,11 +4,11 @@ import org.dbpedia.extraction.annotations.{AnnotationType, SoftwareAgentAnnotati
 import org.dbpedia.extraction.config.ExtractionRecorder
 import org.dbpedia.extraction.config.dataparser.DataParserConfig
 import org.dbpedia.extraction.config.mappings.InfoboxExtractorConfig
-import org.dbpedia.extraction.config.provenance.DBpediaDatasets
+import org.dbpedia.extraction.config.provenance.{DBpediaDatasets, ExtractorRecord, ParserRecord}
 import org.dbpedia.extraction.dataparser._
 import org.dbpedia.extraction.ontology.Ontology
 import org.dbpedia.extraction.ontology.datatypes.{Datatype, DimensionDatatype}
-import org.dbpedia.extraction.transform.Quad
+import org.dbpedia.extraction.transform.{Quad, QuadBuilder}
 import org.dbpedia.extraction.util.RichString.wrapString
 import org.dbpedia.extraction.util._
 import org.dbpedia.extraction.wikiparser._
@@ -31,7 +31,6 @@ class CitationExtractor(
     def ontology : Ontology
     def language : Language
     def redirects : Redirects
-      def recorder[T: ClassTag] : ExtractionRecorder[T]
   } 
 ) 
 extends WikiPageExtractor
@@ -117,7 +116,7 @@ extends WikiPageExtractor
 
         val quads = new ArrayBuffer[Quad]()
 
-        // the simple wiki parser is confused with the <ref> ... </ref> hetml tags and ignores whatever is inside them
+        // the simple wiki parser is confused with the <ref> ... </ref> html tags and ignores whatever is inside them
         // with this hack we create a wikiPage close and remove all "<ref" from the source and then try to reparse the page
         val pageWithoutRefs = new WikiPage(
             title = page.title,
@@ -138,25 +137,45 @@ extends WikiPageExtractor
              if citationTemplatesRegex.exists(regex => regex.findFirstMatchIn(resolvedTitle).isDefined)
         } {
 
-            val citationIri = getCitationIRI(template).toString
+            val qb = QuadBuilder.staticSubject(language, DBpediaDatasets.CitationLinks, getCitationIRI(template).toString, template.getNodeRecord, ExtractorRecord(
+                this.softwareAgentAnnotation
+            ))
 
-            quads += new Quad(language, DBpediaDatasets.CitationLinks, citationIri, isCitedProperty, subjectUri, template.sourceIri, null)
+            qb.setPredicate(isCitedProperty)
+            qb.setValue(subjectUri)
+            qb.setSourceUri(template.sourceIri)
+            quads += qb.getQuad
+
+            //all other quads move into the other dataset
+            qb.setDataset(DBpediaDatasets.CitationData)
 
             for (property <- template.children; if !property.key.forall(_.isDigit)) {
                 // exclude numbered properties
                 // TODO clean HTML
 
                 val cleanedPropertyNode = NodeUtil.removeParentheses(property)
-
                 val splitPropertyNodes = NodeUtil.splitPropertyNode(cleanedPropertyNode, splitPropertyNodeRegexInfobox)
-                for (splitNode <- splitPropertyNodes; pr <- extractValue(splitNode); if pr.unit.nonEmpty) {
-                    val propertyUri = getPropertyUri(property.key)
-                    try {
-                        quads += new Quad(language, DBpediaDatasets.CitationData, citationIri, propertyUri, pr.value, splitNode.sourceIri, pr.unit.get)
-                    }
-                    catch {
-                        case ex: IllegalArgumentException => println(ex)
-                    }
+
+                for (splitNode <- splitPropertyNodes;
+                     pr <- extractValue(splitNode)
+                     if pr.unit.nonEmpty) {
+
+                    //create quad metadata
+                    qb.setExtractor(ExtractorRecord(
+                        this.softwareAgentAnnotation,
+                        pr.provenance.toSeq,
+                        Some(splitPropertyNodes.size),
+                        Some(property.key),
+                        None,
+                        splitNode.containedTemplateNames()
+                    ))
+                    //fill quad
+                    qb.setPredicate(getPropertyUri(property.key))
+                    qb.setValue(pr.value)
+                    qb.setSourceUri(splitNode.sourceIri)
+                    qb.setDatatype(pr.unit.get)
+
+                    quads += qb.getQuad
                 }
             }
         }
@@ -165,7 +184,6 @@ extends WikiPageExtractor
 
     private def extractValue(node : PropertyNode) : List[ParseResult[String]] =
     {
-        // TODO don't convert to SI units (what happens to {{convert|25|kg}} ?)
         extractUnitValue(node).foreach(result => return List(result))
         extractDates(node) match
         {
@@ -180,7 +198,7 @@ extends WikiPageExtractor
             case links if links.nonEmpty => return links
             case _ =>
         }
-        StringParser.parseWithProvenance(node).map(value => ParseResult(value.value, None, Some(xsdStringDt))).toList
+        StringParser.parseWithProvenance(node).map(value => ParseResult(value.value, None, Some(xsdStringDt), value.provenance)).toList
     }
 
     private def extractUnitValue(node : PropertyNode) : Option[ParseResult[String]] =
@@ -192,7 +210,7 @@ extends WikiPageExtractor
 
         if (unitValues.size > 1)
         {
-            StringParser.parseWithProvenance(node).map(value => ParseResult(value.value, None, Some(xsdStringDt)))
+            StringParser.parseWithProvenance(node).map(value => ParseResult(value.value, None, Some(xsdStringDt), value.provenance))
         }
         else if (unitValues.size == 1)
         {
@@ -218,7 +236,7 @@ extends WikiPageExtractor
     {
         StringParser.parseWithProvenance(node) match
         {
-            case Some(ParseResult(RankRegex(number), _, _, _)) => Some(ParseResult(number, None, Some(new Datatype("xsd:integer"))))
+            case Some(ParseResult(RankRegex(number), _, _, prov)) => Some(ParseResult(number, None, Some(new Datatype("xsd:integer")), prov))
             case _ => None
         }
     }
@@ -251,7 +269,7 @@ extends WikiPageExtractor
         for (dateTimeParser <- dateTimeParsers;
              date <- dateTimeParser.parseWithProvenance(node))
         {
-            return Some(ParseResult(date.value.toString, None, Some(date.value.datatype)))
+            return Some(ParseResult(date.value.toString, None, Some(date.value.datatype), date.provenance))
         }
         None
     }
@@ -353,11 +371,6 @@ extends WikiPageExtractor
 
     private def getPropertyValueAsLink(propertyNode: PropertyNode): Option[IRI] =
     {
-        StringParser.parseWithProvenance(propertyNode) match {
-            case Some(pr) if pr.value.trim.nonEmpty => Some(pr.value)
-            case _ => None
-        }
-
         linkParser.parseWithProvenance(propertyNode) match {
             case Some(pr) => Some(pr.value)
             case _ => UriUtils.createURI(propertyNode.children.flatMap(_.toPlainText).mkString.trim) match{
